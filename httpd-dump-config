@@ -10,6 +10,24 @@
 # Try something like  '... | grep -e FILE -e /thing/of/interest' to figure
 # out which file contains a configuration element of interest.
 #
+# Or use this as a great way to help audit two environments for differences.
+#
+#     root@revproxy1:~# diff -Bb <(httpd-dump-config) <(ssh root@revproxy2 httpd-dump-config)
+#     29c29
+#     < MaxClients         150
+#     ---
+#     > MaxClients         400
+#     32,33c32,33
+#     < ThreadsPerChild     25
+#     < MaxRequestsPerChild  0
+#     ---
+#     > ThreadsPerChild     50
+#     > MaxRequestsPerChild  10000
+#     3828a3830
+#     > AddType application/vnd.openxmlformats .docx .pptx .xlsx
+#
+# Don't like diff? Try replacing 'diff -Bb' above with 'meld', which is a GUI tool.
+#
 # 2013-06-05 Cameron Kerr <cameron.kerr.nz@gmail.com>
 #    - Initial release
 #
