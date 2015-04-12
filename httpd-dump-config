@@ -1,0 +1,131 @@
+#!/usr/bin/perl
+#
+# Rip through an Apache httpd.conf (and any included files) and print out the
+# configuration as one file without comments. Great if you have a complex
+# configuration spread out amongst many files.
+#
+# For the benefit of users of Oracle's OHS, it now also dereferences $VARNAME
+# constructs from the environment -- 2015-01-07
+#
+# Try something like  '... | grep -e FILE -e /thing/of/interest' to figure
+# out which file contains a configuration element of interest.
+#
+# 2013-06-05 Cameron Kerr <cameron.kerr.nz@gmail.com>
+#    - Initial release
+#
+# 2014 -- Cameron Kerr
+#    - Some changes to get it working on Debian as well as Red Hat
+#    - Some bug fixes
+#
+# 2015-01-07 Cameron Kerr <cameron.kerr.nz@gmail.com>
+#    - Interpolate environment variables in pathnames (eg. ${COMPONENT_NAME} for OHS)
+#    - Don't attempt to cd to an assumed server_root.
+
+use strict;
+use warnings;
+use Getopt::Long;
+
+my $httpd_conf = '/etc/httpd/conf/httpd.conf';
+my $server_root = '/';
+
+#my $httpd_conf = '/etc/apache2/apache2.conf';
+
+my $with_comments = 0;
+my $interpolate_all = 0;
+
+GetOptions(
+        "conf=s" => \$httpd_conf,
+        "comments" => \$with_comments,
+        "interpolate-all" => \$interpolate_all,
+        ) or die "Usage: $0 [--conf=/path/to/httpd.conf] [--comments] [--interpolate-all]\n";
+
+sub interpolate_environment_variables
+{
+        my ($text) = @_;
+
+        $text =~ s{
+                \$[{]      # opening dollar+curly left paren
+                (\w+)      # name of environment variable
+                [}]        # closing curly right brace
+        }{
+                no strict 'refs';
+                if (defined $ENV{$1}) {
+                        $ENV{$1};
+                } else {
+                        die "No variable \${$1} in $text";
+                }
+        }egx;
+
+        return $text;
+}
+
+sub possibly_interpolate
+{
+        my ($input) = @_;
+
+        if ($interpolate_all)
+        {
+                return interpolate_environment_variables($input);
+        }
+        else
+        {
+                return $input;
+        }
+}
+
+sub process_file
+{
+        my ($config_file) = @_;
+        my $current_accumulated_blank_lines = 0;
+
+        chdir $server_root
+                or die "Could not change directory to '$server_root': $!\n";
+
+        open(my $fh, '<', $config_file)
+                or die "Failed to open file '$config_file': $!\n";
+
+        if ($config_file !~ m/^\//)
+        {
+                $config_file = "$server_root/$config_file";
+        }
+
+        print "# FILE: $config_file\n";
+        while (<$fh>)
+        {
+                if (not $with_comments)
+                {
+                        next if m/^\s*#/;
+                }
+
+                if (m/^\s*serverroot\s+"?([^"\s]+)"?/i)
+                {
+                        $server_root = interpolate_environment_variables($1);
+                }
+
+                if (m/^\s*include\s+"?([^"\s]+)"?/i)
+                {
+                        my $glob_expression = interpolate_environment_variables($1);
+
+                        chdir $server_root;
+
+                        if ( -d $glob_expression )
+                        {
+                                $glob_expression .= '/*';
+                        }
+
+                        my @filenames = glob $glob_expression;
+
+                        map { process_file($_) } @filenames;
+
+                        next;
+                }
+
+                if (m/^\s*$/)   { $current_accumulated_blank_lines += 1; }
+                else            { $current_accumulated_blank_lines = 0; }
+                print possibly_interpolate($_) unless $current_accumulated_blank_lines > 1;
+        }
+
+        close($fh);
+}
+
+process_file($httpd_conf);
