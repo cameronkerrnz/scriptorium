@@ -1,4 +1,27 @@
 #!/bin/bash
+#
+# Cameron Kerr <cameron.kerr.nz@gmail.com>
+#
+# This script will either take a live packet capture, or a previously
+# captured (remember to use -s0) PCAP file containing DNS traffic, and
+# will put some data from the packets (client IP, rrtype, rrval) into
+# a SQLite3 database. A report is then formed which may be of use in
+# looking at clients or requests that are hitting your DNS server
+# overly much.
+#
+# A normalised metric called 'cost' is used, in an
+# attempt to make it easier to spot clients that don't have a caching
+# layer (eg. nscd or better), or perhaps have a misconfigured /etc/hosts
+# file.
+#
+# Additionally, some domains can be aggregated; this is useful for things
+# such as PTR records, and some services that have a very sparse tree,
+# such as Sophos Live, which is an AV product that abuses DNS as a
+# distributed database by forming a hash value of a potential virus and
+# looking that up in DNS under sophosxl.net or such.
+#
+# The database is not deleted after this, which is useful for later
+# querying.
 
 tcpdump=/usr/sbin/tcpdump
 
