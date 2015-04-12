@@ -1,0 +1,74 @@
+#!/bin/bash
+
+tcpdump=/usr/sbin/tcpdump
+
+mode="$1"
+shift
+
+if [ "$mode" = "pcap" ]; then
+    capture_file="$1"
+    echo "Reading pcap file $capture_file"
+elif [ "$mode" = "live" ]; then
+    interface="$1"
+    sample_size="$2"
+    capture_file=/tmp/query-sample.pcap
+    echo "Capturing sample of $sample_size packets from interface $interface"
+    $tcpdump -w $capture_file -i "$interface" -nn -p -c "$sample_size" -s0 dst port domain
+else
+    echo "Usage: $0 pcap <filename>" >&2
+    echo "       $0 live <ifdev> <packet_count>" >&2
+    exit 1
+fi
+
+echo "Building database..."
+
+rm -f /tmp/query-sample.sqlite3
+sqlite3 /tmp/query-sample.sqlite3 'create table queries (count int,client,querytype,queryval);'
+
+# NOTE: add any other reverse domains of interest (such as your own).
+# NOTE: The sophos stuff is there as an example, as it is one of those things
+#       that abuses the DNS system as its own distributed database mechanism.
+
+$tcpdump -r "$capture_file" -nn dst port domain \
+    | sed -rne 's/^[^ ]+ IP ([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)\.[0-9]+ > ([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)\.[0-9]+: .* ([^?]+)\? ([A-Za-z0-9._-]+) .*/\1 \3 \4/p' \
+    | awk '
+        { queryval = $3 }
+        queryval ~ /\.sophosxl\.com\.$/ { queryval = "SOMETHING.sophosxl.com." }
+        queryval ~ /\.sophosxl\.net\.$/ { queryval = "SOMETHING.sophosxl.net." }
+        queryval ~ /\.10\.in-addr\.arpa\.$/ { queryval = "SOMETHING.10.in-addr.arpa." }
+        queryval ~ /[0-9]*\.[0-9]*\.[0-9]*\.[0-9]*\.in-addr\.arpa\.$/ { queryval = "SOMETHING.in-addr.arpa." }
+        { print $1,$2,queryval }' \
+    | sort | uniq -c \
+    | sed -re 's/[ \t]+/|/g' -e 's/^\|//' \
+    | sqlite3 /tmp/query-sample.sqlite3 '.import /dev/stdin queries'
+
+echo "
+    In this report, Cost is a count of such queries received,
+    normalised by the number of clients that queried it. Thus,
+    something with a Cost greater than 10 (<= are omitted),
+    would likely benefit from DNS caching.
+
+    Some queries, namely inverse lookups and things under
+    sophosxl.com (used for Sophos live-protection) are
+    aggregated.
+
+"
+
+sqlite3 /tmp/query-sample.sqlite3 <<EOF
+.mode column
+.header on
+
+.width 4 7 70
+select sum(count)/count(count) as Cost, querytype as RRtype, queryval as Name from queries group by RRtype,Name having Cost > 10 order by Cost desc limit 100;
+
+.width 9 6 15
+select sum(count) as NumQueries, querytype as RRtype, client as Client from queries group by Client having NumQueries > 10 order by NumQueries desc limit 100;
+EOF
+
+$tcpdump -tt -r $capture_file -nn \
+    | grep '\.53: ' \
+    | cut -d. -f1 | uniq -c \
+    | awk '
+        NR == 1 {starttime = $2; next}
+        {total += $1; count += 1; last = $1; lasttime = $2}
+        END { total -= last; print "Queries / second = " total / (lasttime - starttime) }'
