@@ -1,0 +1,52 @@
+#!/bin/bash
+#
+# Cameron Kerr <cameron.kerr.nz@gmail.com>
+#
+# An underappreciated cause of processes crawling to an
+# (almost) halt is lack of entropy in the random number
+# pool. This can be particularly common in virtual
+# machine environments (eg. VMware) as the VM has no
+# 'hardware' RNG to be able to use.
+#
+# I found this to be particularly annoying when services
+# were starting, particularly in large Java middleware
+# environments, which spend _minutes_ more than they
+# ought to have done when starting. I created this tool
+# to let me eyeball how frequently starvation of this
+# important resource occurred, and it was happening
+# quite frequently and causing application stalls.
+#
+# 2015-04-12T22:52:17     2596    4096    1024    128
+# 2015-04-12T22:52:19     2596    4096    1024    128
+# 2015-04-12T22:52:21     2596    4096    1024    128
+# ^C
+#
+# The important column to keep an eye on is the second
+# column (2596); this is how much entropy is available.
+# You will see this dip sharply, and increase slowly. If
+# it gets to less than 64, then it is likely that a stall
+# will have manifest itself.
+#
+# One way to 'treat' this is to use /dev/urandom instead
+# of /dev/random, which lowers the grade or random numbers,
+# but I instead told the kernel to start filling it up
+# earlier; when there is say 1024 (fourth column above)
+# bytes remaining, rather than 64. What a difference!
+#
+#   $ cat /proc/sys/kernel/random/read_wakeup_threshold
+#   1024
+#
+# With this setting, the available entropy is much more
+# bouyant, and also refills faster. I don't see stalls
+# now (though they are still a possibility).
+
+interval="${1:-2}"
+
+while sleep "$interval"
+do
+    (
+        date '+%FT%T'
+        cat /proc/sys/kernel/random/{entropy_avail,poolsize,read_wakeup_threshold,write_wakeup_threshold} \
+    ) | tr '\n' '\t'
+    echo
+done
