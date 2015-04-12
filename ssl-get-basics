@@ -1,0 +1,52 @@
+#!/bin/bash
+#
+# Cameron Kerr <cameron.kerr.nz@gmail.com>
+#
+# A useful way of querying and verifying the basic information
+# for a SSL/TLS based service. NOTE: will not work with STARTTLS
+# type of things, just things that start out as SSL/TLS.
+#
+#    $ ssl-get-basics google.com:443
+#    # Connecting from myworkstation.example.com
+#    ## google.com:443
+#    # server certificate
+#    Subject: *.google.com
+#    EndDate: Jun 23 00:00:00 2015 GMT
+#    Aliases: DNS:*.google.com, DNS:*.android.com, ... (surprisingly many)
+#    # chain
+#     0 s: *.google.com
+#       i: Google Internet Authority G2
+#     1 s: Google Internet Authority G2
+#       i: GeoTrust Global CA
+#     2 s: GeoTrust Global CA
+#       i:/C=US/O=Equifax/OU=Equifax Secure Certificate Authority
+
+
+case "$1" in
+        '-h'|'--help'|'')
+                echo "  " >&2
+                echo "  Fetches SSL certificate on host:port and displays" >&2
+                echo "    DNS names and expiration date/time" >&2
+                echo "  " >&2
+                echo "  Usage: $(basename $0) host:port ..." >&2
+                echo "  " >&2
+                echo "  Example: ssl-get-basics server{1,2}.example.com:443" >&2
+                echo "  " >&2
+                ;;
+esac
+
+echo "# Connecting from $(hostname)"
+for host_port in "$@"
+do
+        echo "## $host_port"
+        echo "# server certificate"
+        openssl s_client -connect "$host_port" </dev/null 2>&1 \
+          | openssl x509 -noout -subject -enddate \
+          | sed -re 's,^subject= .*/CN=,Subject: ,' -e 's,^notAfter=,EndDate: ,'
+        openssl s_client -connect "$host_port" </dev/null 2>&1 \
+          | ssl-rfc-xargs openssl x509 -noout -text \
+          | grep -A1 'X509v3 Subject Alternative Name' \
+          | sed -ne '/DNS:/s/^ */Aliases: /p'
+        echo "# chain"
+        openssl s_client -connect "$host_port" -showcerts </dev/null 2>&1 \
+          | grep '^ [0-9 ] [si]:' | sed -re 's,([is]:)(.*)/CN=(.*),\1 \3,'
