@@ -1,0 +1,40 @@
+#!/bin/bash
+#
+# Cameron Kerr <cameron.kerr.nz@gmail.com>
+#
+# For an input of concatenated PEM ("rfc style") certificates, and a
+# command-line consisting of a command to run, run the command over each PEM
+# certificate in the file. Typically the command would be something like
+# 'openssl x509 -subject -issuer'.
+#
+# Example:
+#
+# Have a look at ssl-get-basics to see how this script is used to print
+# out the certificate chain offered by the service under test.
+#
+# Here is an example of getting easier-to-read data from a Java
+# keystore. Here I'm listing, in sorted order, the subject of
+# certificate in [a] default Java trust store.
+#
+#    keytool -list -rfc -keystore /etc/pki/java/cacerts -storepass changeit \
+#      | ssl-rfc-xargs openssl x509 -noout -subject | sort
+#
+# The purpose of the 'sed' command is to accommodate its use to work on
+# certificates stored inside an XML file. If that interests you, you may
+# want to edit it to suit (unless you're using Shibboleth IdP.
+
+sed -e 's/^[ \t]*<ds:X509Certificate>\(.*\)$/-----BEGIN CERTIFICATE-----\n\1/' \
+    -e 's/^[ \t]*<\/ds:X509Certificate>[ \t]*$/-----END CERTIFICATE-----\n/' \
+    -e 's/^\(.*\)<\/ds:X509Certificate>[ \t]*$/\1\n-----END CERTIFICATE-----\n/' \
+| gawk -vcommand="$*" '
+    /^-----BEGIN /,/^-----END / {
+        print |& command
+    }
+    /^-----END / {
+        while ((command |& getline results) > 0) {
+             print results
+        }
+        close(command)
+    }
+    '
+
