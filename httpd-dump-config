@@ -38,6 +38,11 @@
 # 2015-01-07 Cameron Kerr <cameron.kerr.nz@gmail.com>
 #    - Interpolate environment variables in pathnames (eg. ${COMPONENT_NAME} for OHS)
 #    - Don't attempt to cd to an assumed server_root.
+#
+# 2016-06-08 Cameron Kerr <cameron.kerr.nz@gmail.com>
+#    - Print out FILE again after finishing each file so the following works nicely
+#      httpd-dump-config | grep -e FILE -e SSLCertificate
+#      Before, you might have seen a hit in conf.d/welcome.conf instead of httpd.conf
 
 use strict;
 use warnings;
@@ -135,6 +140,8 @@ sub process_file
 
                         map { process_file($_) } @filenames;
 
+                        print "# FILE: $config_file\n";
+                        
                         next;
                 }
 
