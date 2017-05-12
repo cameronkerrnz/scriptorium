@@ -21,32 +21,53 @@
 #     2 s: GeoTrust Global CA
 #       i:/C=US/O=Equifax/OU=Equifax Secure Certificate Authority
 
-
 case "$1" in
-        '-h'|'--help'|'')
-                echo "  " >&2
-                echo "  Fetches SSL certificate on host:port and displays" >&2
-                echo "    DNS names and expiration date/time" >&2
-                echo "  " >&2
-                echo "  Usage: $(basename $0) host:port ..." >&2
-                echo "  " >&2
-                echo "  Example: ssl-get-basics server{1,2}.example.com:443" >&2
-                echo "  " >&2
-                ;;
+  '-h'|'--help'|'')
+    >&2 echo "  " 
+    >&2 echo "  Fetches SSL certificate on host:port and displays" 
+    >&2 echo "    DNS names and expiration date/time" 
+    >&2 echo "  " 
+    >&2 echo "  Usage: $(basename $0) host:port ..." 
+    >&2 echo "    Extra args are passed to openssl s_client" 
+    >&2 echo "  " 
+    >&2 echo "  Example: ssl-get-basics server.example.com" 
+    >&2 echo "" 
+    >&2 echo "  Example: ssl-get-basics server.example.com:443" 
+    >&2 echo "" 
+    >&2 echo "  Example: ssl-get-basics server.example.com:443 -servername sni-site.example.com" 
+    >&2 echo "" 
+    >&2 echo "    This example shows simulating an SNI request" 
+    >&2 echo "  " 
+    exit 1
+    ;;
+  *:*)
+    # Good, that looks reasonable
+    host_port="$1"
+    shift
+    ;;
+  *)
+    # default to 443 if no port specified
+    host_port="${1}:443"
+    shift
+    ;;
 esac
 
+
 echo "# Connecting from $(hostname)"
-for host_port in "$@"
-do
-        echo "## $host_port"
-        echo "# server certificate"
-        openssl s_client -connect "$host_port" </dev/null 2>&1 \
-          | openssl x509 -noout -subject -enddate \
-          | sed -re 's,^subject= .*/CN=,Subject: ,' -e 's,^notAfter=,EndDate: ,'
-        openssl s_client -connect "$host_port" </dev/null 2>&1 \
-          | ssl-rfc-xargs openssl x509 -noout -text \
-          | grep -A1 'X509v3 Subject Alternative Name' \
-          | sed -ne '/DNS:/s/^ */Aliases: /p'
-        echo "# chain"
-        openssl s_client -connect "$host_port" -showcerts </dev/null 2>&1 \
-          | grep '^ [0-9 ] [si]:' | sed -re 's,([is]:)(.*)/CN=(.*),\1 \3,'
+echo "## $host_port"
+echo "# server certificate"
+openssl s_client -connect "$host_port" "$@" </dev/null 2>&1 \
+  | openssl x509 -noout -subject -enddate -serial \
+  | sed -re 's,^subject= .*/CN=,Subject: ,' -e 's,^notAfter=,EndDate: ,' \
+         -e '/^serial=/{' \
+             -e 's,^serial=,,' -e 's/../&:/g' -e 's/:$//' \
+             -e 'y/ABCDEF/abcdef/' -e 's/^/Serial: /' \
+         -e '}'
+openssl s_client -connect "$host_port" "$@" </dev/null 2>&1 \
+  | ssl-rfc-xargs openssl x509 -noout -text \
+  | grep -A1 'X509v3 Subject Alternative Name' \
+  | sed -ne '/DNS:/s/^ */Aliases: /p'
+echo "# chain"
+openssl s_client -connect "$host_port" "$@" -showcerts </dev/null 2>&1 \
+  | grep '^ [0-9 ] [si]:' | sed -re 's,([is]:)(.*)/CN=(.*),\1 \3,'
+
